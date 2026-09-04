@@ -27,6 +27,7 @@ h1, h2, p { margin-top: 0; }
 .directory-heading { align-items: end; margin-bottom: 20px; }
 .directory-heading h2 { margin-bottom: 5px; font-size: clamp(22px, 5vw, 30px); }
 .directory-heading p { margin-bottom: 0; font-size: 14px; }
+.retry-load { margin-top: 10px; padding: 8px 12px; border: 1px solid #4b9cff; border-radius: 9px; color: #fff; background: #173761; font-size: 13px; font-weight: 800; }
 .directory-heading strong { flex: 0 0 auto; color: #72df90; font-size: 14px; }
 .channel-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 12px; }
 .channel-card { min-height: 106px; display: flex; align-items: center; gap: 14px; padding: 16px; border: 1px solid #263f5d; border-radius: 18px; color: #eef5ff; background: rgba(13, 31, 53, .9); text-align: left; transition: transform .16s ease, border-color .16s ease, background .16s ease; }
