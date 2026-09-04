@@ -1,0 +1,80 @@
+:root { color: #eef5ff; background: #08111f; font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-synthesis: none; }
+* { box-sizing: border-box; }
+body { min-width: 320px; min-height: 100vh; margin: 0; background: radial-gradient(circle at 20% 0%, #173761 0, #08111f 48%, #050a12 100%); }
+body.player-open { overflow: hidden; }
+button, input { font: inherit; }
+button { border: 0; cursor: pointer; }
+.login-screen { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
+.login-card { width: min(100%, 390px); padding: 30px; border: 1px solid #263b55; border-radius: 24px; background: rgba(12, 28, 48, .94); box-shadow: 0 24px 70px rgba(0,0,0,.34); }
+.brand-mark { width: 56px; height: 56px; display: grid; place-items: center; margin-bottom: 20px; border-radius: 18px; color: #fff; background: linear-gradient(135deg, #22a447, #1464f4); font-weight: 900; }
+h1, h2, p { margin-top: 0; }
+.login-card h1 { margin-bottom: 8px; }
+.login-card p, .directory-heading p { color: #aebed1; }
+.login-card label { display: grid; gap: 7px; margin-top: 16px; color: #d6e4f4; font-size: 14px; font-weight: 700; }
+.login-card input { width: 100%; height: 46px; padding: 0 13px; border: 1px solid #38516d; border-radius: 12px; color: #fff; background: #0a1a2c; outline: none; }
+.login-card input:focus { border-color: #4da4ff; box-shadow: 0 0 0 3px rgba(77,164,255,.18); }
+.login-card button, .logout-button { min-height: 44px; border-radius: 12px; color: #fff; background: #1464f4; font-weight: 800; }
+.login-card button { width: 100%; margin-top: 22px; }
+.login-card button:disabled { opacity: .6; cursor: wait; }
+.error { margin-top: 16px; padding: 10px 12px; border-radius: 10px; color: #ffd5d5; background: #642b35; }
+.app-shell { min-height: 100vh; padding: max(20px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) 28px max(16px, env(safe-area-inset-left)); }
+.app-header, .directory-heading, .player-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.app-header { width: min(100%, 1080px); margin: 0 auto 28px; padding: 8px 0; }
+.app-header h1 { margin: 4px 0 0; font-size: clamp(24px, 6vw, 34px); }
+.eyebrow { color: #61c982; font-size: 11px; font-weight: 900; letter-spacing: .16em; }
+.logout-button { padding: 0 15px; background: #203957; }
+.directory { width: min(100%, 1080px); margin: 0 auto; }
+.directory-heading { align-items: end; margin-bottom: 20px; }
+.directory-heading h2 { margin-bottom: 5px; font-size: clamp(22px, 5vw, 30px); }
+.directory-heading p { margin-bottom: 0; font-size: 14px; }
+.directory-heading strong { flex: 0 0 auto; color: #72df90; font-size: 14px; }
+.channel-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 12px; }
+.channel-card { min-height: 106px; display: flex; align-items: center; gap: 14px; padding: 16px; border: 1px solid #263f5d; border-radius: 18px; color: #eef5ff; background: rgba(13, 31, 53, .9); text-align: left; transition: transform .16s ease, border-color .16s ease, background .16s ease; }
+.channel-card:hover, .channel-card:focus-visible { border-color: #4b9cff; background: #122e4d; outline: none; transform: translateY(-2px); }
+.channel-badge { width: 54px; height: 54px; display: grid; flex: 0 0 auto; place-items: center; border-radius: 16px; color: #fff; background: linear-gradient(135deg, #22a447, #1464f4); font-size: 13px; font-weight: 900; }
+.channel-copy { min-width: 0; display: grid; gap: 4px; }
+.channel-copy b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.channel-copy small { color: #aebed1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.channel-status { color: #f4b6b6 !important; font-size: 12px; }
+.channel-status.is-available { color: #72df90 !important; }
+.open-arrow { margin-left: auto; color: #7da1c6; font-size: 28px; }
+.empty { color: #aebed1; }
+.pwa-install-card { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-top: 24px; padding: 20px; border: 1px solid #315174; border-radius: 18px; background: rgba(13, 31, 53, .72); }
+.pwa-install-card h2 { margin: 5px 0; font-size: 20px; }
+.pwa-install-card p { margin: 0; color: #aebed1; font-size: 14px; }
+.pwa-install-button, .pwa-submit { min-height: 44px; padding: 0 16px; border-radius: 12px; color: #fff; background: #1464f4; font-weight: 800; white-space: nowrap; }
+.pwa-dialog { position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; padding: 20px; }
+.pwa-dialog.hidden, .hidden { display: none; }
+.pwa-dialog-backdrop { position: absolute; inset: 0; background: rgba(0, 0, 0, .62); }
+.pwa-dialog-card { position: relative; width: min(100%, 390px); padding: 26px; border: 1px solid #385675; border-radius: 20px; background: #0c1c30; box-shadow: 0 24px 70px rgba(0,0,0,.45); }
+.pwa-dialog-card h2 { margin: 0 36px 8px 0; }
+.pwa-dialog-card > p { color: #aebed1; }
+.pwa-dialog-card label { display: grid; gap: 7px; margin-top: 18px; color: #d6e4f4; font-size: 14px; font-weight: 700; }
+.pwa-dialog-card input { width: 100%; height: 46px; padding: 0 13px; border: 1px solid #38516d; border-radius: 12px; color: #fff; background: #0a1a2c; outline: none; }
+.pwa-dialog-card input:focus { border-color: #4da4ff; box-shadow: 0 0 0 3px rgba(77,164,255,.18); }
+.pwa-dialog-close { position: absolute; top: 12px; right: 14px; width: 34px; height: 34px; border-radius: 9px; color: #d6e4f4; background: transparent; font-size: 26px; line-height: 1; }
+.pwa-submit { width: 100%; margin-top: 18px; }
+.pwa-submit:disabled { opacity: .6; cursor: wait; }
+.player { position: fixed; inset: 0; z-index: 5; display: flex; flex-direction: column; background: #000; }
+.player.hidden { display: none; }
+.player-header { min-height: 68px; padding: 10px max(12px, env(safe-area-inset-right)) 10px max(12px, env(safe-area-inset-left)); color: #fff; background: #1464f4; }
+.player-header button { min-height: 44px; padding: 0 14px; border-radius: 11px; color: #1464f4; background: #fff; font-weight: 800; }
+.channel-nav-button { width: 42px; padding: 0 !important; font-size: 30px; line-height: 1; }
+.player-header strong { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.player-volume { display: inline-flex; align-items: center; gap: 8px; color: #fff; font-size: 20px; }
+.player-volume input { width: 150px; height: 32px; accent-color: #fff; }
+.player-volume span { min-width: 28px; font-size: 13px; font-weight: 800; }
+#volume-icon { min-width: 0 !important; font-size: 30px !important; line-height: 1; }
+.player video { width: 100%; height: 100%; min-height: 0; flex: 1; object-fit: contain; }
+.player > p { position: absolute; right: 16px; bottom: max(16px, env(safe-area-inset-bottom)); left: 16px; max-width: calc(100% - 32px); margin: 0 auto; color: #fff; text-align: center; text-shadow: 0 1px 4px #000; pointer-events: none; }
+.player-channel-title { position: absolute; top: 50%; left: 50%; z-index: 3; max-width: calc(100% - 40px); padding: 14px 22px; border-radius: 12px; color: #fff; background: rgba(0, 0, 0, .68); font-size: clamp(22px, 5vw, 34px); font-weight: 800; text-align: center; transform: translate(-50%, -50%); transition: opacity .7s ease; pointer-events: none; }
+.player-channel-title.is-hidden { opacity: 0; }
+@media (orientation: landscape) and (max-height: 620px) and (max-width: 900px) {
+  .player { height: 100dvh; }
+  .player-header { position: absolute; inset: 0 0 auto; z-index: 2; transition: transform .9s ease, opacity .9s ease; }
+  .player-header.is-hidden { pointer-events: none; transform: translateY(-110%); opacity: 0; }
+  .player video { width: 100%; height: 100dvh; flex: 0 0 100dvh; }
+}
+@media (max-width: 620px) { .directory-heading { align-items: flex-start; flex-direction: column; gap: 5px; } .player-header { gap: 8px; } .player-header strong { display: none; } .player-volume { margin-left: auto; } .player-volume input { width: 125px; } }
+@media (max-width: 620px) { .pwa-install-card { align-items: stretch; flex-direction: column; } .pwa-install-button { width: 100%; } }
+@media (display-mode: standalone), (display-mode: fullscreen), (display-mode: minimal-ui) { .pwa-install-card { display: none !important; } }
