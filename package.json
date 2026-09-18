@@ -6,7 +6,6 @@
   "description": "Lietuviška TV web ir Electron programėlė",
   "main": "electron/main.mjs",
   "scripts": {
-    "postinstall": "electron install-electron",
     "start": "node server.mjs",
     "dev": "nodemon server.mjs",
     "electron": "electron .",
