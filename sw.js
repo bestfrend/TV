@@ -1,5 +1,5 @@
-const CACHE = 'tv-app-shell-v13'
-const SHELL = ['/', '/index.html', '/styles.css?v=12', '/app.js?v=12', '/manifest.webmanifest', '/icons/OIP.webp']
+const CACHE = 'tv-app-shell-v41'
+const SHELL = ['/', '/index.html', '/styles.css?v=32', '/app.js?v=31', '/manifest.webmanifest', '/icons/OIP.webp']
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)))

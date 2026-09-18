@@ -1,0 +1,28 @@
+appId: com.tvapps.app
+productName: TV Apps
+directories:
+  output: dist
+files:
+  - electron/**/*
+  - server.mjs
+  - index.html
+  - app.js
+  - styles.css
+  - sw.js
+  - manifest.webmanifest
+  - icons/**/*
+  - package.json
+extraResources:
+  - from: .env
+    to: app.env
+asar: true
+win:
+  target:
+    - nsis
+  artifactName: TV-Apps-Setup-${version}.${ext}
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  runAfterFinish: true

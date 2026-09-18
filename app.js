@@ -13,18 +13,18 @@ let channels = []
 let currentHls = null
 let deferredInstallPrompt = null
 let currentChannelIndex = -1
+let lastAudibleVolume = 0.65
 const landscapeMediaQuery = window.matchMedia('(orientation: landscape) and (max-height: 620px) and (max-width: 900px)')
 let playerHeaderHideTimer = null
 let channelTitleHideTimer = null
+let playerErrorHideTimer = null
 
 function showPlayerHeader() {
   const header = document.querySelector('.player-header')
   if (!header) return
   header.classList.remove('is-hidden')
   clearTimeout(playerHeaderHideTimer)
-  if (landscapeMediaQuery.matches) {
-    playerHeaderHideTimer = setTimeout(() => header.classList.add('is-hidden'), 5000)
-  }
+  playerHeaderHideTimer = setTimeout(() => header.classList.add('is-hidden'), 5000)
 }
 
 function syncLandscapePlayerUi() {
@@ -35,18 +35,74 @@ function syncLandscapePlayerUi() {
   player.classList.toggle('is-landscape', isLandscape)
   // The player has its own top bar; never show the browser's bottom controls.
   video.removeAttribute('controls')
+  video.controls = false
+  video.disablePictureInPicture = true
+  video.setAttribute('disablepictureinpicture', '')
   showPlayerHeader()
 }
 
 function changeChannel(direction) {
-  const nextIndex = currentChannelIndex + direction
-  if (nextIndex < 0 || nextIndex >= channels.length) return
+  if (!channels.length) return
+  const nextIndex = (currentChannelIndex + direction + channels.length) % channels.length
   openPlayer(channels[nextIndex])
 }
 
-function updateVolumeIcon(value) {
+function getChannelNumber(channel) {
+  const index = channels.findIndex((item) => item.id === channel?.id)
+  return index >= 0 ? index + 1 : 0
+}
+
+function getChannelLabel(channel) {
+  const number = getChannelNumber(channel)
+  return number ? `${number}. ${channel.name}` : channel.name
+}
+
+function flashChannelButton(button) {
+  button.classList.remove('is-pressed')
+  void button.offsetWidth
+  button.classList.add('is-pressed')
+  setTimeout(() => button.classList.remove('is-pressed'), 300)
+}
+
+function updateVolumeIcon(value, muted = false) {
   const icon = document.querySelector('#volume-icon')
-  if (icon) icon.textContent = value === 0 ? '🔇' : '🔊'
+  if (icon) icon.textContent = muted || value === 0 ? '\u{1F507}' : '\u{1F50A}'
+}
+
+function updateVolumeLevel(value) {
+  const level = document.querySelector('#volume-level')
+  if (level) level.textContent = `${Math.round(value / 0.65 * 5)}/5`
+}
+
+function toggleFrameMute() {
+  const video = document.querySelector('#video')
+  const volumeInput = document.querySelector('#volume')
+  if (!video || !volumeInput) return
+  if (video.muted || video.volume === 0) {
+    const restoredValue = Math.max(lastAudibleVolume, 0.13)
+    volumeInput.value = String(restoredValue)
+    video.volume = restoredValue
+    video.muted = false
+    updateVolumeIcon(restoredValue, false)
+    updateVolumeLevel(restoredValue)
+    return
+  }
+  lastAudibleVolume = Math.max(video.volume, 0.13)
+  video.muted = true
+  updateVolumeIcon(video.volume, true)
+}
+
+function setFixedChannelQuality(hls) {
+  const quality = hls.levels
+    .map((level, index) => ({ level, index }))
+    .find(({ level }) => Number(level.height) === 540)
+    || hls.levels
+      .map((level, index) => ({ level, index }))
+      .sort((a, b) => Number(a.level.height) - Number(b.level.height))[0]
+  if (quality) {
+    hls.autoLevelCapping = quality.index
+    hls.currentLevel = quality.index
+  }
 }
 
 function showChannelTitle(title) {
@@ -56,6 +112,14 @@ function showChannelTitle(title) {
   overlay.textContent = title
   overlay.classList.remove('is-hidden')
   channelTitleHideTimer = setTimeout(() => overlay.classList.add('is-hidden'), 3500)
+}
+
+function setPlayerError(message, hideAfterMs = 0) {
+  const error = document.querySelector('#player-error')
+  if (!error) return
+  clearTimeout(playerErrorHideTimer)
+  error.textContent = message
+  if (hideAfterMs > 0) playerErrorHideTimer = setTimeout(() => { error.textContent = '' }, hideAfterMs)
 }
 
 function setServerState(message, canRetry = false) {
@@ -101,25 +165,53 @@ function renderDirectory(message = '') {
       <p class="error hidden" id="pwa-error" role="alert"></p><button class="pwa-submit" type="submit">Patvirtinti ir įdiegti</button>
     </form>
   </div><div class="player hidden" id="player"><header class="player-header"><button id="back">← Visi kanalai</button><strong id="player-title"></strong><label class="player-volume">🔊 <input id="volume" type="range" min="0" max="0.65" step="0.13" value="0.65" aria-label="Garsumas"><span id="volume-level">5/5</span></label></header><video id="video" controls playsinline></video><p id="player-error"></p></div>`
-  document.querySelector('.player-header').insertAdjacentHTML('beforeend', '<button id="previous-channel" class="channel-nav-button" type="button" aria-label="Ankstesnis kanalas">‹</button><button id="next-channel" class="channel-nav-button" type="button" aria-label="Kitas kanalas">›</button>')
+  document.querySelector('.player-header').insertAdjacentHTML('beforeend', '<div class="channel-switcher" role="group" aria-label="Kanalų keitimas"><button id="previous-channel" class="channel-nav-button btn btn-light" type="button" aria-label="Ankstesnis kanalas"><span class="channel-nav-glyph" aria-hidden="true">‹</span></button><button id="next-channel" class="channel-nav-button btn btn-light" type="button" aria-label="Kitas kanalas"><span class="channel-nav-glyph" aria-hidden="true">›</span></button></div>')
+  const playerHeader = document.querySelector('.player-header')
   const volumeLabel = document.querySelector('.player-volume')
-  volumeLabel.insertAdjacentHTML('afterbegin', '<span id="volume-icon" aria-hidden="true">🔊</span>')
-  if (volumeLabel.childNodes[1]?.nodeType === Node.TEXT_NODE) volumeLabel.childNodes[1].textContent = ''
+  const channelSwitcher = document.querySelector('.channel-switcher')
+  const playerHeaderLayout = document.createElement('div')
+  playerHeaderLayout.className = 'player-header-layout'
+  playerHeader.append(playerHeaderLayout)
+  playerHeaderLayout.append(document.querySelector('#back'), document.querySelector('#player-title'), channelSwitcher, volumeLabel)
+  volumeLabel.innerHTML = '<button id="volume-toggle" class="volume-toggle" type="button" aria-label="Garso nustatymai" aria-expanded="false" aria-controls="volume-panel"><span id="volume-icon" aria-hidden="true">&#128266;</span></button><div id="volume-panel" class="volume-panel"><input id="volume" type="range" min="0" max="0.65" step="0.13" value="0.65" aria-label="Garsumas"><span id="volume-level">5/5</span></div>'
   document.querySelector('.player').insertAdjacentHTML('beforeend', '<div id="player-channel-title" class="player-channel-title" aria-live="polite"></div>')
   document.querySelector('.directory-heading > div').insertAdjacentHTML('beforeend', '<button id="retry-load" class="retry-load hidden" type="button">Atnaujinti</button>')
   setupPwaInstall()
   document.querySelector('#back').addEventListener('click', closePlayer)
-  document.querySelector('#previous-channel').addEventListener('click', () => changeChannel(-1))
-  document.querySelector('#next-channel').addEventListener('click', () => changeChannel(1))
+  document.querySelector('#previous-channel').addEventListener('click', (event) => { flashChannelButton(event.currentTarget); setTimeout(() => changeChannel(-1), 100) })
+  document.querySelector('#next-channel').addEventListener('click', (event) => { flashChannelButton(event.currentTarget); setTimeout(() => changeChannel(1), 100) })
   document.querySelector('#retry-load').addEventListener('click', loadChannels)
+  document.querySelector('#volume-toggle').addEventListener('click', (event) => {
+    event.stopPropagation()
+    const video = document.querySelector('#video')
+    const volumeInput = document.querySelector('#volume')
+    const currentValue = Number(volumeInput.value)
+    if (video.muted || currentValue === 0) {
+      const restoredValue = 0.13
+      volumeInput.value = String(restoredValue)
+      video.volume = restoredValue
+      video.muted = false
+      updateVolumeIcon(restoredValue)
+      document.querySelector('#volume-level').textContent = '1/5'
+      volumeLabel.classList.remove('is-open')
+      event.currentTarget.setAttribute('aria-expanded', 'false')
+      return
+    }
+    const isOpen = volumeLabel.classList.toggle('is-open')
+    event.currentTarget.setAttribute('aria-expanded', String(isOpen))
+  })
   syncLandscapePlayerUi()
   document.querySelector('#player').addEventListener('click', showPlayerHeader)
+  document.querySelector('#video').addEventListener('click', toggleFrameMute)
+  document.querySelector('#player').addEventListener('pointermove', showPlayerHeader, { passive: true })
+  document.querySelector('#player').addEventListener('pointerdown', showPlayerHeader, { passive: true })
   document.querySelector('#volume').addEventListener('input', (event) => {
     const value = Number(event.target.value)
     document.querySelector('#video').volume = value
     document.querySelector('#video').muted = value === 0
-    updateVolumeIcon(value)
-    document.querySelector('#volume-level').textContent = `${Math.round(value / 0.65 * 5)}/5`
+    if (value > 0) lastAudibleVolume = value
+    updateVolumeIcon(value, value === 0)
+    updateVolumeLevel(value)
   })
   renderChannels()
 }
@@ -183,10 +275,13 @@ function renderChannels() {
   if (!grid) return
   const available = channels.filter((channel) => channel.available === true).length
   document.querySelector('#channel-count').textContent = `Veikia ${available} iš ${channels.length}`
-  grid.innerHTML = channels.map((channel) => `<button class="channel-card" data-channel-id="${escapeHtml(channel.id)}">
-    <span class="channel-badge">${escapeHtml(channel.badge || 'TV')}</span><span class="channel-copy"><b>${escapeHtml(channel.name)}</b><small>${escapeHtml(channel.description || 'Viešas TV srautas')}</small><small class="channel-status ${channel.available ? 'is-available' : ''}">${channel.available ? 'Srautas veikia' : 'Srautas nepatikrintas arba neveikia'}</small></span><span class="open-arrow">›</span>
+  grid.innerHTML = channels.map((channel, index) => `<button class="channel-card" data-channel-id="${escapeHtml(channel.id)}">
+    <span class="channel-badge">${escapeHtml(channel.badge || 'TV')}</span><span class="channel-copy"><b>${index + 1}. ${escapeHtml(channel.name)}</b><small>${escapeHtml(channel.description || 'Viešas TV srautas')}</small><small class="channel-status ${channel.available ? 'is-available' : ''}">${channel.available ? 'Srautas veikia' : 'Srautas nepatikrintas arba neveikia'}</small></span><span class="open-arrow">›</span>
   </button>`).join('') || '<p class="empty">Kanalų rasti nepavyko.</p>'
-  grid.querySelectorAll('[data-channel-id]').forEach((card) => card.addEventListener('click', () => openPlayer(channels.find((channel) => channel.id === card.dataset.channelId))))
+  grid.querySelectorAll('[data-channel-id]').forEach((card) => card.addEventListener('click', () => {
+    flashChannelButton(card)
+    setTimeout(() => openPlayer(channels.find((channel) => channel.id === card.dataset.channelId)), 260)
+  }))
 }
 
 async function loadChannels() {
@@ -214,34 +309,48 @@ async function openPlayer(channel) {
   currentChannelIndex = channels.findIndex((item) => item.id === channel.id)
   const player = document.querySelector('#player')
   const video = document.querySelector('#video')
-  const error = document.querySelector('#player-error')
+  const channelLabel = getChannelLabel(channel)
   currentHls?.destroy()
   currentHls = null
+  clearTimeout(playerErrorHideTimer)
   video.pause()
   video.removeAttribute('src')
   video.load()
-  document.querySelector('#player-title').textContent = channel.name
-  showChannelTitle(channel.name)
+  document.querySelector('#player-title').textContent = String(getChannelNumber(channel) || '')
+  showChannelTitle(channelLabel)
   document.querySelector('#volume').value = '0.65'
   document.querySelector('#volume-level').textContent = '5/5'
+  lastAudibleVolume = 0.65
   updateVolumeIcon(0.65)
-  error.textContent = 'Jungiamasi…'
+  setPlayerError('Jungiamasi…')
   player.classList.remove('hidden')
   document.body.classList.add('player-open')
   showPlayerHeader()
   try {
     const streamUrl = channel.streamChannel
-      ? (await (await api(`/tv/stream/${channel.streamChannel}`)).json()).url
+      ? `${apiBase}/tv/hls/${encodeURIComponent(channel.streamChannel)}`
+      : channel.source === 'iptv-org'
+        ? `${apiBase}/tv/iptv-org/stream/${encodeURIComponent(channel.id)}`
       : channel.directStreamUrl
     if (!streamUrl) throw new Error('Srauto gauti nepavyko')
-    error.textContent = ''
-    const play = () => video.play().catch(() => { error.textContent = 'Paspauskite vaizdą, kad pradėtumėte transliaciją.' })
+    setPlayerError('')
+    const play = () => { void video.play().catch(() => undefined) }
     if (HlsPlayer?.isSupported()) {
-      currentHls = new HlsPlayer({ enableWorker: false, lowLatencyMode: false })
-      currentHls.on(HlsPlayer.Events.MANIFEST_PARSED, play)
-      currentHls.on(HlsPlayer.Events.ERROR, (_event, data) => { if (data.fatal) error.textContent = 'Šio kanalo paleisti nepavyksta.' })
-      currentHls.loadSource(streamUrl)
-      currentHls.attachMedia(video)
+      const hls = new HlsPlayer({
+        enableWorker: false,
+        lowLatencyMode: false,
+        capLevelToPlayerSize: true,
+        maxBufferLength: 20,
+        backBufferLength: 30,
+      })
+      currentHls = hls
+      hls.on(HlsPlayer.Events.MANIFEST_PARSED, () => {
+        setFixedChannelQuality(hls)
+        play()
+      })
+      currentHls.on(HlsPlayer.Events.ERROR, (_event, data) => { if (data.fatal) setPlayerError('Šio kanalo paleisti nepavyksta.', 7000) })
+      hls.loadSource(streamUrl)
+      hls.attachMedia(video)
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = streamUrl
       video.addEventListener('loadedmetadata', play, { once: true })
@@ -249,13 +358,14 @@ async function openPlayer(channel) {
       throw new Error('Ši naršyklė nepalaiko HLS vaizdo.')
     }
   } catch (loadError) {
-    error.textContent = loadError instanceof Error ? loadError.message : 'Srauto paleisti nepavyko.'
+    setPlayerError(loadError instanceof Error ? loadError.message : 'Srauto paleisti nepavyko.', 7000)
   }
 }
 
 function closePlayer() {
   currentHls?.destroy()
   currentHls = null
+  clearTimeout(playerErrorHideTimer)
   const video = document.querySelector('#video')
   video.pause()
   video.removeAttribute('src')
@@ -281,5 +391,5 @@ window.addEventListener('appinstalled', () => {
 landscapeMediaQuery.addEventListener?.('change', syncLandscapePlayerUi)
 window.addEventListener('orientationchange', syncLandscapePlayerUi)
 
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js?v=5').catch(() => undefined)
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js?v=33').catch(() => undefined)
 void start()

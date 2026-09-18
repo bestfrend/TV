@@ -1,7 +1,7 @@
 import { randomBytes, randomUUID, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
-import { extname, join, normalize } from 'node:path'
+import { extname, join, normalize, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { createServer } from 'node:http'
@@ -11,11 +11,15 @@ const port = Number(process.env.PORT || 4174)
 const httpUserAgent = 'tv-app/0.1'
 const scrypt = promisify(scryptCallback)
 const sessions = new Map()
+const lrtStreamCache = new Map()
+const iptvStreamCache = new Map()
 const SESSION_TIMEOUT_MS = 60_000
 const MAX_CLIENTS = 20
+const LRT_STREAM_CACHE_MS = 20_000
+const lrtProxyHosts = new Set(['stream-captions.lrt.lt', 'stream-secure.lrt.lt'])
 
 function loadEnv() {
-  const envPath = join(root, '.env')
+  const envPath = process.env.TV_APP_ENV_FILE || join(root, '.env')
   if (!existsSync(envPath)) return
   for (const line of readFileSync(envPath, 'utf8').split(/\r?\n/)) {
     const match = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/)
@@ -119,6 +123,8 @@ async function isHlsStreamAvailable(url) {
 async function resolveLrtStream(channel) {
   const resolverUrl = lrtResolvers[channel]
   if (!resolverUrl) return null
+  const cached = lrtStreamCache.get(channel)
+  if (cached && cached.expiresAt > Date.now()) return cached.url
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 10_000)
   try {
@@ -126,8 +132,142 @@ async function resolveLrtStream(channel) {
     if (!result.ok) return null
     const payload = await result.json()
     const data = payload?.response?.data
-    return [data?.content, data?.content2, data?.audio].find(isHlsUrl) || null
+    // `content2` / `audio` are audio-only media playlists for these channels.
+    // `content` is the signed master playlist that contains the video variants.
+    // The browser receives it through our same-origin proxy, so the signed URL
+    // remains usable even when the client device has a different IP address.
+    const url = [data?.content, data?.content2, data?.audio].find(isHlsUrl) || null
+    if (url) lrtStreamCache.set(channel, { url, expiresAt: Date.now() + LRT_STREAM_CACHE_MS })
+    return url
   } catch { return null } finally { clearTimeout(timeout) }
+}
+
+function proxyHlsUrl(channel, upstreamUrl, inheritedSearch = '') {
+  const upstream = new URL(upstreamUrl)
+  const path = `${upstream.pathname}${upstream.search || inheritedSearch}`
+  return `/api/tv/hls/${channel}?path=${encodeURIComponent(path)}&origin=${encodeURIComponent(upstream.origin)}`
+}
+
+function rewriteHlsPlaylist(channel, playlist, upstreamUrl) {
+  const inheritedSearch = new URL(upstreamUrl).search
+  const rewriteUri = (uri) => {
+    const absoluteUri = /^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(uri.trim())
+    return proxyHlsUrl(channel, new URL(uri, upstreamUrl).href, absoluteUri ? '' : inheritedSearch)
+  }
+  return playlist.split(/\r?\n/).map((line) => {
+    if (!line.trim()) return line
+    if (line.trim().startsWith('#')) {
+      return line.replace(/URI="([^"]+)"/g, (_match, uri) => {
+        try { return `URI="${rewriteUri(uri)}"` } catch { return `URI="${uri}"` }
+      })
+    }
+    try { return rewriteUri(line.trim()) } catch { return line }
+  }).join('\n')
+}
+
+async function proxyLrtHls(request, response, channel) {
+  const streamUrl = await resolveLrtStream(channel)
+  if (!streamUrl) { sendJson(response, 502, { error: 'LRT srautas šiuo metu nepasiekiamas' }); return }
+  const requestUrl = new URL(request.url || '/', 'http://localhost')
+  const requestedPath = requestUrl.searchParams.get('path')
+  const requestedOrigin = requestUrl.searchParams.get('origin') || new URL(streamUrl).origin
+  let upstreamUrl = streamUrl
+  if (requestedPath) {
+    try {
+      const origin = new URL(requestedOrigin)
+      if (origin.protocol !== 'https:' || !lrtProxyHosts.has(origin.hostname)) throw new Error('Neleistinas LRT hostas')
+      upstreamUrl = new URL(requestedPath, origin).href
+    } catch {
+      sendJson(response, 400, { error: 'Neteisingas HLS srauto kelias' }); return
+    }
+  }
+  try {
+    const headers = { 'User-Agent': httpUserAgent }
+    if (request.headers.range) headers.Range = request.headers.range
+    const result = await fetch(upstreamUrl, { headers })
+    if (!result.ok) { sendJson(response, 502, { error: 'LRT srauto dalis nepasiekiama' }); return }
+    const contentType = result.headers.get('content-type') || ''
+    if (contentType.includes('mpegurl') || /\.m3u8(?:\?|$)/i.test(upstreamUrl)) {
+      const playlist = rewriteHlsPlaylist(channel, await result.text(), upstreamUrl)
+      response.writeHead(200, { 'Content-Type': 'application/vnd.apple.mpegurl', 'Cache-Control': 'no-store' })
+      response.end(playlist)
+      return
+    }
+    const payload = Buffer.from(await result.arrayBuffer())
+    response.writeHead(result.status, {
+      'Content-Type': contentType || 'video/mp2t',
+      'Cache-Control': 'no-store',
+      'Content-Length': String(payload.length),
+    })
+    response.end(payload)
+  } catch (error) {
+    console.error(`LRT HLS tarpinio srauto klaida (${channel}):`, error)
+    sendJson(response, 502, { error: 'LRT srauto paleisti nepavyko' })
+  }
+}
+
+function proxyIptvUrl(channelId, upstreamUrl, inheritedSearch = '') {
+  const upstream = new URL(upstreamUrl)
+  const path = `${upstream.pathname}${upstream.search || inheritedSearch}`
+  return `/api/tv/iptv-org/stream/${encodeURIComponent(channelId)}?path=${encodeURIComponent(path)}&origin=${encodeURIComponent(upstream.origin)}`
+}
+
+function rewriteIptvPlaylist(channelId, playlist, upstreamUrl) {
+  const inheritedSearch = new URL(upstreamUrl).search
+  const rewriteUri = (uri) => {
+    const absoluteUri = /^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(uri.trim())
+    return proxyIptvUrl(channelId, new URL(uri, upstreamUrl).href, absoluteUri ? '' : inheritedSearch)
+  }
+  return playlist.split(/\r?\n/).map((line) => {
+    if (!line.trim()) return line
+    if (line.trim().startsWith('#')) {
+      return line.replace(/URI="([^"]+)"/g, (_match, uri) => {
+        try { return `URI="${rewriteUri(uri)}"` } catch { return `URI="${uri}"` }
+      })
+    }
+    try { return rewriteUri(line.trim()) } catch { return line }
+  }).join('\n')
+}
+
+async function proxyIptvHls(request, response, channelId) {
+  const streamUrl = iptvStreamCache.get(channelId)
+  if (!streamUrl) { sendJson(response, 404, { error: 'IPTV kanalas nerastas' }); return }
+  const requestUrl = new URL(request.url || '/', 'http://localhost')
+  const requestedPath = requestUrl.searchParams.get('path')
+  const baseUrl = new URL(streamUrl)
+  let upstreamUrl = streamUrl
+  if (requestedPath) {
+    try {
+      const origin = new URL(requestUrl.searchParams.get('origin') || baseUrl.origin)
+      if (origin.origin !== baseUrl.origin) throw new Error('Neleistinas IPTV hostas')
+      upstreamUrl = new URL(requestedPath, origin).href
+    } catch {
+      sendJson(response, 400, { error: 'Neteisingas IPTV srauto kelias' }); return
+    }
+  }
+  try {
+    const headers = { 'User-Agent': httpUserAgent }
+    if (request.headers.range) headers.Range = request.headers.range
+    const result = await fetch(upstreamUrl, { headers })
+    if (!result.ok) { sendJson(response, 502, { error: 'IPTV srauto dalis nepasiekiama' }); return }
+    const contentType = result.headers.get('content-type') || ''
+    if (contentType.includes('mpegurl') || /\.m3u8(?:\?|$)/i.test(upstreamUrl)) {
+      const playlist = rewriteIptvPlaylist(channelId, await result.text(), upstreamUrl)
+      response.writeHead(200, { 'Content-Type': 'application/vnd.apple.mpegurl', 'Cache-Control': 'no-store' })
+      response.end(playlist)
+      return
+    }
+    const payload = Buffer.from(await result.arrayBuffer())
+    response.writeHead(result.status, {
+      'Content-Type': contentType || 'video/mp2t',
+      'Cache-Control': 'no-store',
+      'Content-Length': String(payload.length),
+    })
+    response.end(payload)
+  } catch (error) {
+    console.error(`IPTV HLS tarpinio srauto klaida (${channelId}):`, error)
+    sendJson(response, 502, { error: 'IPTV srauto paleisti nepavyko' })
+  }
 }
 
 async function handleApi(request, response, pathname) {
@@ -179,6 +319,16 @@ async function handleApi(request, response, pathname) {
     sendJson(response, 200, { channels }); return
   }
 
+  const hlsProxyMatch = pathname.match(/^\/api\/tv\/hls\/(LTV1|LTV2)$/i)
+  if (hlsProxyMatch && request.method === 'GET') {
+    await proxyLrtHls(request, response, hlsProxyMatch[1].toUpperCase()); return
+  }
+
+  const iptvProxyMatch = pathname.match(/^\/api\/tv\/iptv-org\/stream\/([^/]+)$/)
+  if (iptvProxyMatch && request.method === 'GET') {
+    await proxyIptvHls(request, response, decodeURIComponent(iptvProxyMatch[1])); return
+  }
+
   const streamMatch = pathname.match(/^\/api\/tv\/stream\/([^/]+)$/)
   if (streamMatch && request.method === 'GET') {
     const channel = streamMatch[1].toUpperCase()
@@ -200,7 +350,9 @@ async function handleApi(request, response, pathname) {
         if (!info.startsWith('#EXTINF') || !url || !/^https?:\/\//i.test(url)) continue
         const name = info.split(',').slice(1).join(',').trim()
         if (!name) continue
-        channels.push({ id: `iptv-org-${channels.length}`, name, description: 'Dinaminis IPTV-org viešas HLS srautas', badge: 'TV', directStreamUrl: url, source: 'iptv-org', available: false })
+        const id = `iptv-org-${channels.length}`
+        iptvStreamCache.set(id, url)
+        channels.push({ id, name, description: 'Dinaminis IPTV-org viešas HLS srautas', badge: 'TV', directStreamUrl: url, source: 'iptv-org', available: false })
         index += 1
       }
       const checked = await Promise.all(channels.map(async (channel) => ({ ...channel, available: await isHlsStreamAvailable(channel.directStreamUrl) })))
@@ -231,11 +383,18 @@ async function serveFile(request, response) {
   }
 }
 
-createServer((request, response) => {
-  const pathname = new URL(request.url || '/', 'http://localhost').pathname
-  if (pathname.startsWith('/api/')) { void handleApi(request, response, pathname); return }
-  void serveFile(request, response)
-}).listen(port, '0.0.0.0', () => {
-  console.log(`TV Apps serveris veikia: http://localhost:${port}`)
-  if (!configuredPasswordHash && !configuredPassword) console.warn('Nustatykite TV_APP_PASSWORD arba TV_APP_PASSWORD_HASH faile .env')
-})
+export function startServer({ host = '0.0.0.0', portNumber = port } = {}) {
+  const server = createServer((request, response) => {
+    const pathname = new URL(request.url || '/', 'http://localhost').pathname
+    if (pathname.startsWith('/api/')) { void handleApi(request, response, pathname); return }
+    void serveFile(request, response)
+  })
+  server.listen(portNumber, host, () => {
+    console.log(`TV Apps serveris veikia: http://localhost:${portNumber}`)
+    if (!configuredPasswordHash && !configuredPassword) console.warn('Nustatykite TV_APP_PASSWORD arba TV_APP_PASSWORD_HASH faile .env')
+  })
+  return server
+}
+
+const directRun = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))
+if (directRun) startServer()

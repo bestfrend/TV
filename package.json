@@ -3,11 +3,19 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "description": "Lietuviška TV web ir Electron programėlė",
+  "main": "electron/main.mjs",
   "scripts": {
+    "postinstall": "electron install-electron",
     "start": "node server.mjs",
-    "dev": "nodemon server.mjs"
+    "dev": "nodemon server.mjs",
+    "electron": "electron .",
+    "desktop:dist": "electron-builder --win nsis",
+    "desktop:pack": "electron-builder --win portable"
   },
   "devDependencies": {
+    "electron": "latest",
+    "electron-builder": "^26.15.3",
     "nodemon": "^3.1.10"
   }
 }

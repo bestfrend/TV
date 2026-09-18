@@ -37,3 +37,20 @@ Jei norite grąžinti `winAlpa` Tailscale maršrutą:
 ```powershell
 tailscale serve --https=8443 off
 ```
+
+## Electron TV Apps
+
+TV Apps Electron dalis yra atskira maža programa šiame projekte. Ji naudoja tą patį TV web ekraną ir LRT API, bet neturi `winAlpa` rendererio, logotipo, voice ar remote-control dalių.
+
+Kūrimo metu paleiskite:
+
+```powershell
+npm install
+npm run electron
+```
+
+Windows paketą sukurkite:
+
+```powershell
+npm run desktop:dist
+```
